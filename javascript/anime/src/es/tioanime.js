@@ -6,7 +6,7 @@ const mangayomiSources = [{
     "iconUrl": "https://tioanime.com/assets/img/tio_fb.jpg",
     "typeSource": "single",
     "itemType": 1,
-    "version": "0.1.14",
+    "version": "0.1.15",
     "dateFormat": "",
     "dateFormatLocale": "",
     "pkgPath": "anime/src/es/tioanime.js"
@@ -50,7 +50,31 @@ class DefaultExtension extends MProvider {
     async search(query, page, filters) {
         query = query.trim().replaceAll(/\ +/g, "+");
         let url = `${this.source.baseUrl}/directorio?q=${query}&p=${page}`;
-        return await this.parseAnimeList(url);
+        let result = await this.parseAnimeList(url);
+
+        // Si la búsqueda con el título completo no devuelve nada,
+        // reintentar con variantes (subtítulo tras ":" y menos palabras).
+        if (result.list.length == 0 && page == 1) {
+            const candidates = this.searchVariants(query);
+            for (const candidate of candidates) {
+                const r = await this.parseAnimeList(`${this.source.baseUrl}/directorio?q=${candidate}&p=1`);
+                if (r.list.length > 0) {
+                    result = r;
+                    break;
+                }
+            }
+        }
+        return result;
+    }
+    searchVariants(query) {
+        const main = query.split("%3A")[0].split(":")[0].trim();
+        const words = main.split("+").filter(w => w.length > 0);
+        const variants = [];
+        if (main != query) variants.push(main.replace(/\ +/g, "+"));
+        for (let i = Math.min(4, words.length - 1); i >= 1; i--) {
+            variants.push(words.slice(0, i).join("+"));
+        }
+        return [...new Set(variants)].filter(v => v.length > 0);
     }
     async getDetail(url) {
         const res = await this.client.get(this.source.baseUrl + url);

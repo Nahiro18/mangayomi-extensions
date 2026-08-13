@@ -6,7 +6,7 @@ const mangayomiSources = [{
     "iconUrl": "https://tioanime.com/assets/img/tio_fb.jpg",
     "typeSource": "single",
     "itemType": 1,
-    "version": "0.1.12",
+    "version": "0.1.13",
     "dateFormat": "",
     "dateFormatLocale": "",
     "pkgPath": "anime/src/es/tioanime.js"
@@ -58,7 +58,8 @@ class DefaultExtension extends MProvider {
         const detail = {};
 
         const info = doc.selectFirst("article.anime-single");
-        const episodeCount = parseInt(/episodes = \[(\d+)/.exec(doc.select("script").pop().innerHtml)[1]);
+        const episodeScript = doc.select("script").find(s => s.innerHtml.includes("var episodes"));
+        const episodeCount = episodeScript ? parseInt(/episodes = \[(\d+)/.exec(episodeScript.innerHtml)[1]) : 0;
         const episodeUrl = url.replace("/anime", "/ver") + "-";
 
         detail.name = info.selectFirst("h1").text;
@@ -86,7 +87,8 @@ class DefaultExtension extends MProvider {
         const type = /\blatino\b/i.test(url) ? 'Dub' : 'Sub';
 
         // get links
-        const raws = [...doc.select("script").pop().innerHtml.matchAll(/\[".*?\]/g)];
+        const videosScript = doc.select("script").find(s => s.innerHtml.includes("var videos"));
+        const raws = [...(videosScript ? videosScript.innerHtml : "").matchAll(/\[".*?\]/g)];
 
         // extract videos
         for (const raw of raws) {
@@ -641,10 +643,10 @@ async function jwplayerExtractor(text, headers) {
 function sortVideos(videos) {
     const pref = new SharedPreferences();
     const getres = RegExp('(\\d+)p?', 'i');
-    const lang = RegExp(pref.get('lang'), 'i');
-    const type = RegExp(pref.get('type'), 'i');
-    const res = RegExp(getres.exec(pref.get('res'))[1], 'i');
-    const host = RegExp(pref.get('host'), 'i');
+    const lang = RegExp((pref.get('lang') ?? ''), 'i');
+    const type = RegExp((pref.get('type') ?? ''), 'i');
+    const res = RegExp((getres.exec(pref.get('res') ?? '') ?? ['', '0'])[1], 'i');
+    const host = RegExp((pref.get('host') ?? ''), 'i');
 
     let getScore = (q, hasRes) => {
         const bLang = lang.test(q), bType = type.test(q), bRes = res.test(q), bHost = host.test(q);

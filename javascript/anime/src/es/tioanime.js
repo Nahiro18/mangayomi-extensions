@@ -6,7 +6,7 @@ const mangayomiSources = [{
     "iconUrl": "https://tioanime.com/assets/img/tio_fb.jpg",
     "typeSource": "single",
     "itemType": 1,
-    "version": "0.1.13",
+    "version": "0.1.14",
     "dateFormat": "",
     "dateFormatLocale": "",
     "pkgPath": "anime/src/es/tioanime.js"
@@ -403,6 +403,20 @@ async function burstcloudExtractor(url) {
 //  Video Extractor Wrappers
 //--------------------------------------------------------------------------------------------------
 
+function normalizeHeaders(headers, defaultReferer) {
+    const h = { ...(headers || {}) };
+    if (h['referer'] && !h['Referer']) h['Referer'] = h['referer'];
+    if (h['Referer'] && !h['referer']) h['referer'] = h['Referer'];
+    if (!h['Referer'] && defaultReferer) h['Referer'] = defaultReferer;
+    if (h['origin'] && !h['Origin']) h['Origin'] = h['origin'];
+    if (h['Origin'] && !h['origin']) h['origin'] = h['Origin'];
+    if (!h['Origin'] && h['Referer']) h['Origin'] = h['Referer'];
+    if (!h['user-agent'] && !h['User-Agent']) {
+        h['user-agent'] = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
+    }
+    return h;
+}
+
 _streamWishExtractor = streamWishExtractor;
 streamWishExtractor = async (url) => {
     return (await _streamWishExtractor(url, '')).map(v => {
@@ -433,6 +447,7 @@ yourUploadExtractor = async (url) => {
     .filter(v => !v.url.includes('/novideo'))
     .map(v => {
         v.quality = '';
+        v.headers = normalizeHeaders(v.headers, 'https://www.yourupload.com/');
         return v;
     });
 }
@@ -467,6 +482,7 @@ async function extractAny(url, method, lang, type, host, headers = null) {
     const m = extractAny.methods[method];
     return (!m) ? [] : (await m(url, headers)).map(v => {
         v.quality = v.quality ? `${lang} ${type} ${v.quality} ${host}` : `${lang} ${type} ${host}`;
+        v.headers = normalizeHeaders(v.headers);
         return v;
     });
 };

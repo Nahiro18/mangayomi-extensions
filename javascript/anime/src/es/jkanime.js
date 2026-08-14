@@ -6,7 +6,7 @@ const mangayomiSources = [{
     "iconUrl": "https://cdn.jkanime.net/logo_jk.png",
     "typeSource": "single",
     "itemType": 1,
-    "version": "0.1.16",
+    "version": "0.1.17",
     "dateFormat": "",
     "dateFormatLocale": "",
     "pkgPath": "anime/src/es/jkanime.js"
@@ -100,7 +100,7 @@ class DefaultExtension extends MProvider {
         const token = res.body.match(/<meta name="csrf-token" content="([^"]+)"/)?.[1];
         if (!token) return { "list": [], "hasNextPage": false };
         const body = `_token=${encodeURIComponent(token)}&q=${encodeURIComponent(query)}`;
-        res = await new Client().post(`${this.source.baseUrl}/ajax_search`, body, {
+        res = await this.client.post(`${this.source.baseUrl}/ajax_search`, body, {
             'Content-Type': 'application/x-www-form-urlencoded',
             'X-Requested-With': 'XMLHttpRequest',
             'Referer': `${this.source.baseUrl}/buscar?q=${query}`
@@ -135,7 +135,7 @@ class DefaultExtension extends MProvider {
         if (token) {
             let pag = 1;
             while (true) {
-                res = await new Client().post(`${this.source.baseUrl}/ajax/episodes/${id}/${pag}`, `_token=${encodeURIComponent(token)}`, {
+                res = await this.client.post(`${this.source.baseUrl}/ajax/episodes/${id}/${pag}`, `_token=${encodeURIComponent(token)}`, {
                     'Content-Type': 'application/x-www-form-urlencoded',
                     'X-Requested-With': 'XMLHttpRequest',
                     'Referer': url

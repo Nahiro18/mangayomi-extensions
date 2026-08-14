@@ -6,7 +6,7 @@ const mangayomiSources = [{
     "iconUrl": "https://cdn.jkanime.net/logo_jk.png",
     "typeSource": "single",
     "itemType": 1,
-    "version": "0.1.21",
+    "version": "0.1.22",
     "dateFormat": "",
     "dateFormatLocale": "",
     "pkgPath": "anime/src/es/jkanime.js"
@@ -139,39 +139,58 @@ class DefaultExtension extends MProvider {
         const doc = new Document(res.body);
         const detail = {};
 
-        const id = res.body.match(/data-anime="(\d+)"/)[1];
+        const id = res.body.match(/data-anime="(\d+)"/)?.[1];
 
         const info = doc.selectFirst("div.anime__details__content");
-        detail.name = info.selectFirst("h3").text;
-        detail.imageUrl = info.selectFirst("img").attr('src');
-        detail.description = info.selectFirst("p.scroll").text.trim();
+        if (info) {
+            detail.name = info.selectFirst("h3")?.text;
+            detail.imageUrl = info.selectFirst("img")?.attr('src');
+            detail.description = info.selectFirst("p.scroll")?.text.trim();
+        }
         const st = res.body.match(/<span>Estado:<\/span>\s*<div class="enemision[^"]*">\s*([^<]+?)\s*</)?.[1];
         detail.status = this.statusFromString(st);
-        const gen = res.body.match(/<li><span>Generos:<\/span>(.*?)<\/li>/s)?.[1];
-        detail.genre = gen ? new Document(gen).select('a').map(e => e.text) : [];
-        const studios = res.body.match(/<li><span>Studios:<\/span>(.*?)<\/li>/s)?.[1];
-        detail.author = studios ? new Document(studios).select('a').map(e => e.text).join(', ') : '';
+        detail.genre = [];
+        const gen = res.body.match(/<li><span>Generos:<\/span>([\s\S]*?)<\/li>/)?.[1];
+        if (gen) {
+            const linkRe = /<a[^>]*>([^<]+)<\/a>/g;
+            let lm;
+            while ((lm = linkRe.exec(gen)) !== null) detail.genre.push(lm[1]);
+        }
+        detail.author = '';
+        const studios = res.body.match(/<li><span>Studios:<\/span>([\s\S]*?)<\/li>/)?.[1];
+        if (studios) {
+            const linkRe = /<a[^>]*>([^<]+)<\/a>/g;
+            let lm;
+            const authors = [];
+            while ((lm = linkRe.exec(studios)) !== null) authors.push(lm[1]);
+            detail.author = authors.join(', ');
+        }
 
         // get episodes (paginated ajax)
         detail.episodes = [];
         const token = res.body.match(/<meta name="csrf-token" content="([^"]+)"/)?.[1];
-        if (token) {
+        if (token && id) {
             let pag = 1;
-            while (true) {
-                res = await this.client.post(`${this.source.baseUrl}/ajax/episodes/${id}/${pag}`, `_token=${encodeURIComponent(token)}`, {
-                    'Content-Type': 'application/x-www-form-urlencoded',
-                    'X-Requested-With': 'XMLHttpRequest',
-                    'Referer': url
-                });
-                const data = JSON.parse(res.body);
-                for (const item of data.data) {
-                    detail.episodes.push({
-                        name: 'Episodio ' + item.number,
-                        url: url + '/' + item.number
+            while (pag <= 100) {
+                try {
+                    res = await this.client.post(`${this.source.baseUrl}/ajax/episodes/${id}/${pag}`, `_token=${encodeURIComponent(token)}`, {
+                        'Content-Type': 'application/x-www-form-urlencoded',
+                        'X-Requested-With': 'XMLHttpRequest',
+                        'Referer': url
                     });
+                    const data = JSON.parse(res.body);
+                    if (!data || !data.data) break;
+                    for (const item of data.data) {
+                        detail.episodes.push({
+                            name: 'Episodio ' + item.number,
+                            url: url + '/' + item.number
+                        });
+                    }
+                    if (pag >= data.last_page) break;
+                    pag++;
+                } catch (e) {
+                    break;
                 }
-                if (pag >= data.last_page) break;
-                pag++;
             }
         }
         detail.episodes.reverse();

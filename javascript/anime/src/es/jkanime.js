@@ -6,7 +6,7 @@ const mangayomiSources = [{
     "iconUrl": "https://cdn.jkanime.net/logo_jk.png",
     "typeSource": "single",
     "itemType": 1,
-    "version": "0.1.24",
+    "version": "0.1.25",
     "dateFormat": "",
     "dateFormatLocale": "",
     "pkgPath": "anime/src/es/jkanime.js"
@@ -154,10 +154,11 @@ class DefaultExtension extends MProvider {
         const uep = res.body.match(/href="([^"]+)"[^>]*id="uep"/)?.[1];
         const lastEp = uep ? parseInt(uep.match(/\/(\d+)\/?$/)?.[1]) : 0;
         if (lastEp > 0) {
+            const base = url.endsWith('/') ? url.slice(0, -1) : url;
             for (let i = 1; i <= lastEp; i++) {
                 detail.episodes.push({
                     name: 'Episodio ' + i,
-                    url: url + '/' + i
+                    url: base + '/' + i
                 });
             }
             detail.episodes.reverse();
@@ -165,8 +166,10 @@ class DefaultExtension extends MProvider {
         return detail;
     }
     async extractRedirect(redirect, referer, lang, type, host) {
-        const res = await this.client.get(this.source.baseUrl + redirect, {'Referer': referer});
-        const m3u = res.body.match(/http.*?.m3u8/)[0];
+        const u = redirect.startsWith('http') ? redirect : this.source.baseUrl + redirect;
+        const res = await this.client.get(u, {'Referer': referer});
+        const m3u = res.body.match(/http.*?.m3u8/)?.[0];
+        if (!m3u) return [];
         return [{ url: m3u, originalUrl: m3u, headers: {'Referer': referer}, quality: `${lang} ${type} ${host}` }];
     };
     // For anime episode video list
@@ -175,20 +178,24 @@ class DefaultExtension extends MProvider {
         const doc = new Document(res.body);
         let promises = [];
         const videos = [];
-        
-        const code = doc.selectFirst("script:contains(var video)").text;
 
-        // extract direct video links
+        const videosScript = doc.select("script").find(s => s.innerHtml.includes("var video"));
+        const code = videosScript ? videosScript.innerHtml : '';
+        if (!code) return [];
+
+        // extract direct video links (jkplayer iframes)
         for (const m of code.matchAll(/video\s*\[\d+\].*?src="(.*?)"/g)) {
             promises.push(this.extractRedirect(m[1], url, 'Español', 'Sub', 'Desu'));
         }
-        promises = [Promise.any(promises)];
+        if (promises.length > 0) promises = [Promise.any(promises)];
 
         // extract remote video links
         for (const server of code.matchAll(/{"remote"\s*:\s*"(.*?)".*?"server"\s*:\s*"(.*?)"/g)) {
-            const link = Uint8Array.fromBase64(server[1]).decode('utf-8');
-            const host = server[2];
-            promises.push(extractAny(link, host.toLowerCase(), 'Español', 'Sub', host));
+            try {
+                const link = Uint8Array.fromBase64(server[1]).decode('utf-8');
+                const host = server[2];
+                promises.push(extractAny(link, host.toLowerCase(), 'Español', 'Sub', host));
+            } catch (e) {}
         }
         for (const p of (await Promise.allSettled(promises))) {
             if (p.status == 'fulfilled') {

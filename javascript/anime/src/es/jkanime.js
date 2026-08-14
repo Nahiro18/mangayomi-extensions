@@ -6,7 +6,7 @@ const mangayomiSources = [{
     "iconUrl": "https://cdn.jkanime.net/logo_jk.png",
     "typeSource": "single",
     "itemType": 1,
-    "version": "0.1.13",
+    "version": "0.1.14",
     "dateFormat": "",
     "dateFormatLocale": "",
     "pkgPath": "anime/src/es/jkanime.js"
@@ -631,6 +631,20 @@ async function burstcloudExtractor(url) {
 //  Video Extractor Wrappers
 //--------------------------------------------------------------------------------------------------
 
+function normalizeHeaders(headers, defaultReferer) {
+    const h = { ...(headers || {}) };
+    if (h['referer'] && !h['Referer']) h['Referer'] = h['referer'];
+    if (h['Referer'] && !h['referer']) h['referer'] = h['Referer'];
+    if (!h['Referer'] && defaultReferer) h['Referer'] = defaultReferer;
+    if (h['origin'] && !h['Origin']) h['Origin'] = h['origin'];
+    if (h['Origin'] && !h['origin']) h['origin'] = h['Origin'];
+    if (!h['Origin'] && h['Referer']) h['Origin'] = h['Referer'];
+    if (!h['user-agent'] && !h['User-Agent']) {
+        h['user-agent'] = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
+    }
+    return h;
+}
+
 _streamWishExtractor = streamWishExtractor;
 streamWishExtractor = async (url) => {
     return (await _streamWishExtractor(url, '')).map(v => {
@@ -640,11 +654,57 @@ streamWishExtractor = async (url) => {
 }
 
 _voeExtractor = voeExtractor;
+function _voeRot13(input) {
+    let out = '';
+    for (let i = 0; i < input.length; i++) {
+        const c = input.charCodeAt(i);
+        if (c >= 0x41 && c <= 0x5a) {
+            out += String.fromCharCode((c - 0x41 + 0xd) % 0x1a + 0x41);
+        } else if (c >= 0x61 && c <= 0x7a) {
+            out += String.fromCharCode((c - 0x61 + 0xd) % 0x1a + 0x61);
+        } else {
+            out += input[i];
+        }
+    }
+    return out;
+}
+function _voeDecodeBlob(blob) {
+    let s = _voeRot13(blob);
+    for (const sep of ['@$', '^^', '~@', '%?', '*~', '!!', '#&']) {
+        s = s.split(sep).join('_');
+    }
+    s = s.split('_').join('').split(' ').join('');
+    const b1 = Uint8Array.fromBase64(s);
+    let latin = '';
+    for (let i = 0; i < b1.length; i++) latin += String.fromCharCode(b1[i]);
+    let sh = '';
+    for (let i = 0; i < latin.length; i++) sh += String.fromCharCode(latin.charCodeAt(i) - 3);
+    const rev = sh.split('').reverse().join('');
+    const b2 = Uint8Array.fromBase64(rev);
+    return b2.decode();
+}
 voeExtractor = async (url) => {
-    return (await _voeExtractor(url, '')).map(v => {
-        v.quality = v.quality.replace(/Voe: (\d+p?)/i, '$1');
-        return v;
-    });
+    try {
+        let res = await new Client().get(url);
+        let doc = new Document(res.body);
+        const firstScript = doc.selectFirst("script");
+        if (firstScript && firstScript.text && firstScript.text.includes("if (typeof localStorage !== 'undefined')")) {
+            const target = firstScript.text.substringAfter("window.location.href = '").substringBefore("';");
+            if (target) {
+                res = await new Client().get(target);
+                doc = new Document(res.body);
+            }
+        }
+        const jsonScript = doc.selectFirst("script[type='application/json']");
+        if (!jsonScript || !jsonScript.text) return [];
+        const blob = JSON.parse(jsonScript.text)[0];
+        if (!blob) return [];
+        const config = JSON.parse(_voeDecodeBlob(blob));
+        if (!config || !config.source) return [];
+        return await m3u8Extractor(config.source, null);
+    } catch (e) {
+        return [];
+    }
 }
 
 _mp4UploadExtractor = mp4UploadExtractor;
@@ -661,6 +721,7 @@ yourUploadExtractor = async (url) => {
     .filter(v => !v.url.includes('/novideo'))
     .map(v => {
         v.quality = '';
+        v.headers = normalizeHeaders(v.headers, 'https://www.yourupload.com/');
         return v;
     });
 }

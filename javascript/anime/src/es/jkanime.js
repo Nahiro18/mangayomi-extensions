@@ -6,7 +6,7 @@ const mangayomiSources = [{
     "iconUrl": "https://cdn.jkanime.net/logo_jk.png",
     "typeSource": "single",
     "itemType": 1,
-    "version": "0.1.15",
+    "version": "0.1.16",
     "dateFormat": "",
     "dateFormatLocale": "",
     "pkgPath": "anime/src/es/jkanime.js"
@@ -26,12 +26,18 @@ class DefaultExtension extends MProvider {
         const code = doc.selectFirst("script:contains(var animes)").text;
         const list = [];
 
-        for (const element of code.matchAll(/{.*?short_title.*?}/g)) {
-            const data = JSON.parse(element[0]);
-            const name = data.title;
-            const imageUrl = data.image;
-            const link = this.source.baseUrl + '/' + data.slug;
-            list.push({ name, imageUrl, link });
+        const raw = code.match(/var animes = (\{.*?\});/s)?.[1];
+        if (raw) {
+            const data = JSON.parse(raw);
+            for (const item of data.data) {
+                list.push({
+                    name: item.title,
+                    imageUrl: item.thumbnail ?? item.image,
+                    link: item.url ?? this.source.baseUrl + '/' + item.slug
+                });
+            }
+            const hasNextPage = data.current_page < data.last_page;
+            return { "list": list, "hasNextPage": hasNextPage };
         }
         
         const nextBtn = doc.selectFirst("a.nav-next");
@@ -68,12 +74,13 @@ class DefaultExtension extends MProvider {
 
         // Search sometimes failed because filters were empty. I experienced this mostly on android...
         if (!filters || filters.length == 0) {
-            return this.parseAnimeList(`${this.source.baseUrl}/buscar/${query}/${page}/`);
+            return this.searchAnime(query, page);
         } else if (query) {
-            var url = `${this.source.baseUrl}/buscar/${query}/${page}/`;
-            url += `?filtro=${filters[1].values[filters[1].state].value}`;
+            var url = `${this.source.baseUrl}/buscar?q=${query}`;
+            url += `&filtro=${filters[1].values[filters[1].state].value}`;
             url += `&tipo=${filters[5].values[filters[5].state].value}`;
             url += `&estado=${filters[6].values[filters[6].state].value}`;
+            return await this.parseAnimeList(url);
         } else {
             var url = `${this.source.baseUrl}/directorio/${query}/${page}`;
             url += `/${filters[1].values[filters[1].state].value}`;
@@ -84,8 +91,27 @@ class DefaultExtension extends MProvider {
             url += `/${filters[6].values[filters[6].state].value}`;
             url += `/${filters[7].values[filters[7].state].value}`;
             url += `/${filters[8].values[filters[8].state].value}`;
+            return await this.parseAnimeList(url);
         }        
-        return await this.parseAnimeList(url);
+    }
+    async searchAnime(query, page) {
+        if (page > 1) return { "list": [], "hasNextPage": false };
+        let res = await this.client.get(`${this.source.baseUrl}/buscar?q=${query}`);
+        const token = res.body.match(/<meta name="csrf-token" content="([^"]+)"/)?.[1];
+        if (!token) return { "list": [], "hasNextPage": false };
+        const body = `_token=${encodeURIComponent(token)}&q=${encodeURIComponent(query)}`;
+        res = await new Client().post(`${this.source.baseUrl}/ajax_search`, body, {
+            'Content-Type': 'application/x-www-form-urlencoded',
+            'X-Requested-With': 'XMLHttpRequest',
+            'Referer': `${this.source.baseUrl}/buscar?q=${query}`
+        });
+        const results = JSON.parse(res.body);
+        const list = results.map(item => ({
+            name: item.title,
+            imageUrl: item.thumbnail ?? item.image,
+            link: item.url ?? this.source.baseUrl + '/' + item.slug
+        }));
+        return { "list": list, "hasNextPage": false };
     }
     async getDetail(url) {
         let res = await this.client.get(url);
@@ -93,7 +119,6 @@ class DefaultExtension extends MProvider {
         const detail = {};
 
         const id = res.body.match(/data-anime="(\d+)"/)[1];
-        const lastEpisodeUrl = `${this.source.baseUrl}/ajax/last_episode/${id}`;
 
         const info = doc.selectFirst("div.anime__details__content");
         const extInfo = doc.selectFirst('div.aninfo');
@@ -104,15 +129,27 @@ class DefaultExtension extends MProvider {
         detail.genre = extInfo.select("li:contains(Genero) a").map(e => e.text);
         detail.author = extInfo.select("li:contains(Studios) a").map(e => e.text).join(', ');
 
-        // get episodes
+        // get episodes (paginated ajax)
         detail.episodes = [];
-        res = await this.client.get(lastEpisodeUrl, {'User-Agent': 'Mangayomi'});
-        const end = parseInt(JSON.parse(res.body)[0].number);
-        for (let i = 1; i <= end; i++) {
-            detail.episodes.push({
-                name: 'Episodio ' + i,
-                url: url + '/' + i
-            });
+        const token = res.body.match(/<meta name="csrf-token" content="([^"]+)"/)?.[1];
+        if (token) {
+            let pag = 1;
+            while (true) {
+                res = await new Client().post(`${this.source.baseUrl}/ajax/episodes/${id}/${pag}`, `_token=${encodeURIComponent(token)}`, {
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                    'X-Requested-With': 'XMLHttpRequest',
+                    'Referer': url
+                });
+                const data = JSON.parse(res.body);
+                for (const item of data.data) {
+                    detail.episodes.push({
+                        name: 'Episodio ' + item.number,
+                        url: url + '/' + item.number
+                    });
+                }
+                if (pag >= data.last_page) break;
+                pag++;
+            }
         }
         detail.episodes.reverse();
         return detail;

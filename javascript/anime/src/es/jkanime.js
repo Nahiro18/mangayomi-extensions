@@ -6,7 +6,7 @@ const mangayomiSources = [{
     "iconUrl": "https://cdn.jkanime.net/logo_jk.png",
     "typeSource": "single",
     "itemType": 1,
-    "version": "0.1.19",
+    "version": "0.1.20",
     "dateFormat": "",
     "dateFormatLocale": "",
     "pkgPath": "anime/src/es/jkanime.js"
@@ -56,12 +56,14 @@ class DefaultExtension extends MProvider {
         const doc = new Document(res.body);
         const list = [];
 
-        for (const i of doc.select('div#conb')) {
-            const name = i.selectFirst('h2 a').text;
-            const imageUrl = i.selectFirst('img').getSrc;
-            let link = i.selectFirst('a').getHref;
-            link = link.endsWith('/') ? link.slice(0, -1) : link;
-            list.push({ name, imageUrl, link });
+        for (const item of doc.select('div.toplist')) {
+            const link = item.selectFirst('a').getHref;
+            const name = item.selectFirst('h5.card-title').text.trim();
+            const imageUrl = item.selectFirst('img').getSrc;
+            if (link) {
+                const clean = link.endsWith('/') ? link.slice(0, -1) : link;
+                list.push({ name, imageUrl, link: clean });
+            }
         }
 
         return { "list": list, "hasNextPage": false };

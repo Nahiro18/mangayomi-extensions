@@ -6,7 +6,7 @@ const mangayomiSources = [{
     "iconUrl": "https://cdn.jkanime.net/logo_jk.png",
     "typeSource": "single",
     "itemType": 1,
-    "version": "0.1.14",
+    "version": "0.1.15",
     "dateFormat": "",
     "dateFormatLocale": "",
     "pkgPath": "anime/src/es/jkanime.js"
@@ -483,21 +483,28 @@ async function vidGuardExtractor(url) {
 
 async function doodExtractor(url) {
     const dartClient = new Client({ 'useDartHttpClient': true, "followRedirects": false });
-    let response = await dartClient.get(url);
-    while ("location" in response.headers) {
-        response = await dartClient.get(response.headers.location);
-    }
-    const newUrl = response.request.url;
-    const doodhost = newUrl.match(/https:\/\/(.*?)\//, newUrl)[0].slice(8, -1);
-    const md5 = response.body.match(/'\/pass_md5\/(.*?)',/, newUrl)[0].slice(11, -2);
-    const token = md5.substring(md5.lastIndexOf("/") + 1);
-    const expiry = new Date().valueOf();
-    const randomString = getRandomString(10);
+    let response;
+    try {
+        response = await dartClient.get(url);
+        while ("location" in response.headers) {
+            response = await dartClient.get(response.headers.location);
+        }
+        const newUrl = response.request.url;
+        const doodhost = newUrl.match(/https:\/\/(.*?)\//)[0].slice(8, -1);
+        const md5match = response.body.match(/'\/pass_md5\/(.*?)',/);
+        if (!md5match) return [];
+        const md5 = md5match[1];
+        const token = md5.substring(md5.lastIndexOf("/") + 1);
+        const expiry = new Date().valueOf();
+        const randomString = getRandomString(10);
 
-    response = await new Client().get(`https://${doodhost}/pass_md5/${md5}`, { "Referer": newUrl });
-    const videoUrl = `${response.body}${randomString}?token=${token}&expiry=${expiry}`;
-    const headers = { "User-Agent": "Mangayomi", "Referer": doodhost };
-    return [{ url: videoUrl, originalUrl: videoUrl, headers: headers, quality: '' }];
+        response = await new Client().get(`https://${doodhost}/pass_md5/${md5}`, { "Referer": newUrl });
+        const videoUrl = `${response.body}${randomString}?token=${token}&expiry=${expiry}`;
+        const headers = { "User-Agent": "Mangayomi", "Referer": doodhost };
+        return [{ url: videoUrl, originalUrl: videoUrl, headers: headers, quality: '' }];
+    } catch (e) {
+        return [];
+    }
 }
 
 async function vidozaExtractor(url) {
@@ -554,7 +561,7 @@ async function mixdropExtractor(url) {
     
     const code = doc.selectFirst('script:contains(MDCore):contains(eval)').text;
     const unpacked = unpackJs(code);
-    let videoUrl = unpacked.match(/wurl="(.*?)"/)?.[1];
+    let videoUrl = unpacked.match(/wurl="(.*?)"/)?.[1] ?? unpacked.match(/furl="(.*?)"/)?.[1];
 
     if (!videoUrl) return [];
 
@@ -772,7 +779,7 @@ extractAny.methods = {
     'sendvid': sendVidExtractor,
     'speedfiles': speedfilesExtractor,
     'streamtape': streamTapeExtractor,
-    'streamwish': vidHideExtractor,
+    'streamwish': streamWishExtractor,
     'vidguard': vidGuardExtractor,
     'vidhide': vidHideExtractor,
     'vidoza': vidozaExtractor,

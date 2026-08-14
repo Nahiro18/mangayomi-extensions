@@ -6,7 +6,7 @@ const mangayomiSources = [{
     "iconUrl": "https://cdn.jkanime.net/logo_jk.png",
     "typeSource": "single",
     "itemType": 1,
-    "version": "0.1.23",
+    "version": "0.1.24",
     "dateFormat": "",
     "dateFormatLocale": "",
     "pkgPath": "anime/src/es/jkanime.js"
@@ -98,48 +98,31 @@ class DefaultExtension extends MProvider {
     }
     async searchAnime(query, page) {
         if (page > 1) return { "list": [], "hasNextPage": false };
-        let res = await this.client.get(`${this.source.baseUrl}/buscar?q=${query}`);
-        const token = res.body.match(/<meta name="csrf-token" content="([^"]+)"/)?.[1];
-        if (!token) return { "list": [], "hasNextPage": false };
-        const body = `_token=${encodeURIComponent(token)}&q=${encodeURIComponent(query)}`;
-        res = await this.client.post(`${this.source.baseUrl}/ajax_search`, {
-            'Content-Type': 'application/x-www-form-urlencoded',
-            'X-Requested-With': 'XMLHttpRequest',
-            'Referer': `${this.source.baseUrl}/buscar?q=${query}`
-        }, body);
-        let results = JSON.parse(res.body);
-        if (results.length == 0) {
-            const words = query.replaceAll('_', ' ').split(' ').filter(w => w.length > 0);
-            const candidates = [];
-            for (let n = 4; n >= 2; n--) {
-                if (words.length >= n) candidates.push(words.slice(0, n).join(' '));
-                if (words.length >= n + 1) candidates.push(words.slice(words.length - n).join(' '));
-            }
-            candidates.push(words.slice(0, 2).join(' '));
-            candidates.push(words.slice(words.length - 2).join(' '));
-            for (const candidate of candidates) {
-                if (results.length > 0) break;
-                res = await this.client.post(`${this.source.baseUrl}/ajax_search`, {
-                    'Content-Type': 'application/x-www-form-urlencoded',
-                    'X-Requested-With': 'XMLHttpRequest',
-                    'Referer': `${this.source.baseUrl}/buscar?q=${candidate}`
-                }, `_token=${encodeURIComponent(token)}&q=${encodeURIComponent(candidate)}`);
-                results = JSON.parse(res.body);
+        const words = query.replaceAll('_', ' ').split(' ').filter(w => w.length > 0);
+        const candidates = [query];
+        for (let n = 4; n >= 2; n--) {
+            if (words.length >= n) candidates.push(words.slice(0, n).join('_'));
+            if (words.length >= n + 1) candidates.push(words.slice(words.length - n).join('_'));
+        }
+        if (words.length >= 2) candidates.push(words.slice(0, 2).join('_'));
+        if (words.length >= 3) candidates.push(words.slice(words.length - 2).join('_'));
+        let list = [];
+        for (const candidate of candidates) {
+            if (list.length > 0) break;
+            const res = await this.client.get(`${this.source.baseUrl}/buscar/${candidate}`);
+            for (const item of new Document(res.body).select('div.anime__item')) {
+                const link = item.selectFirst('a')?.getHref;
+                const name = item.selectFirst('h5 a')?.text;
+                const imageUrl = item.selectFirst('div.anime__item__pic')?.attr('data-setbg');
+                if (link && name) list.push({ name, imageUrl, link });
             }
         }
-        const list = results.map(item => ({
-            name: item.title,
-            imageUrl: item.thumbnail ?? item.image,
-            link: item.url ?? this.source.baseUrl + '/' + item.slug
-        }));
         return { "list": list, "hasNextPage": false };
     }
     async getDetail(url) {
         let res = await this.client.get(url);
         const doc = new Document(res.body);
         const detail = {};
-
-        const id = res.body.match(/data-anime="(\d+)"/)?.[1];
 
         const info = doc.selectFirst("div.anime__details__content");
         if (info) {
@@ -166,34 +149,19 @@ class DefaultExtension extends MProvider {
             detail.author = authors.join(', ');
         }
 
-        // get episodes (paginated ajax)
+        // get episodes from last episode link (no POST/CSRF needed)
         detail.episodes = [];
-        const token = res.body.match(/<meta name="csrf-token" content="([^"]+)"/)?.[1];
-        if (token && id) {
-            let pag = 1;
-            while (pag <= 100) {
-                try {
-                    res = await this.client.post(`${this.source.baseUrl}/ajax/episodes/${id}/${pag}`, {
-                        'Content-Type': 'application/x-www-form-urlencoded',
-                        'X-Requested-With': 'XMLHttpRequest',
-                        'Referer': url
-                    }, `_token=${encodeURIComponent(token)}`);
-                    const data = JSON.parse(res.body);
-                    if (!data || !data.data) break;
-                    for (const item of data.data) {
-                        detail.episodes.push({
-                            name: 'Episodio ' + item.number,
-                            url: url + '/' + item.number
-                        });
-                    }
-                    if (pag >= data.last_page) break;
-                    pag++;
-                } catch (e) {
-                    break;
-                }
+        const uep = res.body.match(/href="([^"]+)"[^>]*id="uep"/)?.[1];
+        const lastEp = uep ? parseInt(uep.match(/\/(\d+)\/?$/)?.[1]) : 0;
+        if (lastEp > 0) {
+            for (let i = 1; i <= lastEp; i++) {
+                detail.episodes.push({
+                    name: 'Episodio ' + i,
+                    url: url + '/' + i
+                });
             }
+            detail.episodes.reverse();
         }
-        detail.episodes.reverse();
         return detail;
     }
     async extractRedirect(redirect, referer, lang, type, host) {

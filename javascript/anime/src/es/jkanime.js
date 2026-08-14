@@ -6,7 +6,7 @@ const mangayomiSources = [{
     "iconUrl": "https://cdn.jkanime.net/logo_jk.png",
     "typeSource": "single",
     "itemType": 1,
-    "version": "0.1.22",
+    "version": "0.1.23",
     "dateFormat": "",
     "dateFormatLocale": "",
     "pkgPath": "anime/src/es/jkanime.js"
@@ -102,11 +102,11 @@ class DefaultExtension extends MProvider {
         const token = res.body.match(/<meta name="csrf-token" content="([^"]+)"/)?.[1];
         if (!token) return { "list": [], "hasNextPage": false };
         const body = `_token=${encodeURIComponent(token)}&q=${encodeURIComponent(query)}`;
-        res = await this.client.post(`${this.source.baseUrl}/ajax_search`, body, {
+        res = await this.client.post(`${this.source.baseUrl}/ajax_search`, {
             'Content-Type': 'application/x-www-form-urlencoded',
             'X-Requested-With': 'XMLHttpRequest',
             'Referer': `${this.source.baseUrl}/buscar?q=${query}`
-        });
+        }, body);
         let results = JSON.parse(res.body);
         if (results.length == 0) {
             const words = query.replaceAll('_', ' ').split(' ').filter(w => w.length > 0);
@@ -119,11 +119,11 @@ class DefaultExtension extends MProvider {
             candidates.push(words.slice(words.length - 2).join(' '));
             for (const candidate of candidates) {
                 if (results.length > 0) break;
-                res = await this.client.post(`${this.source.baseUrl}/ajax_search`, `_token=${encodeURIComponent(token)}&q=${encodeURIComponent(candidate)}`, {
+                res = await this.client.post(`${this.source.baseUrl}/ajax_search`, {
                     'Content-Type': 'application/x-www-form-urlencoded',
                     'X-Requested-With': 'XMLHttpRequest',
                     'Referer': `${this.source.baseUrl}/buscar?q=${candidate}`
-                });
+                }, `_token=${encodeURIComponent(token)}&q=${encodeURIComponent(candidate)}`);
                 results = JSON.parse(res.body);
             }
         }
@@ -173,11 +173,11 @@ class DefaultExtension extends MProvider {
             let pag = 1;
             while (pag <= 100) {
                 try {
-                    res = await this.client.post(`${this.source.baseUrl}/ajax/episodes/${id}/${pag}`, `_token=${encodeURIComponent(token)}`, {
+                    res = await this.client.post(`${this.source.baseUrl}/ajax/episodes/${id}/${pag}`, {
                         'Content-Type': 'application/x-www-form-urlencoded',
                         'X-Requested-With': 'XMLHttpRequest',
                         'Referer': url
-                    });
+                    }, `_token=${encodeURIComponent(token)}`);
                     const data = JSON.parse(res.body);
                     if (!data || !data.data) break;
                     for (const item of data.data) {

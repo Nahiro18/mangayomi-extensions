@@ -6,7 +6,7 @@ const mangayomiSources = [{
     "iconUrl": "https://cdn.jkanime.net/logo_jk.png",
     "typeSource": "single",
     "itemType": 1,
-    "version": "0.1.20",
+    "version": "0.1.21",
     "dateFormat": "",
     "dateFormatLocale": "",
     "pkgPath": "anime/src/es/jkanime.js"
@@ -142,13 +142,15 @@ class DefaultExtension extends MProvider {
         const id = res.body.match(/data-anime="(\d+)"/)[1];
 
         const info = doc.selectFirst("div.anime__details__content");
-        const extInfo = doc.selectFirst('div.aninfo');
         detail.name = info.selectFirst("h3").text;
-        detail.imageUrl = info.selectFirst("div.anime__details__pic").attr('data-setbg');
-        detail.description = info.selectFirst("p.sinopsis").text.trim();
-        detail.status = this.statusFromString(extInfo.selectFirst("span:contains(Estado) + span").text);
-        detail.genre = extInfo.select("li:contains(Genero) a").map(e => e.text);
-        detail.author = extInfo.select("li:contains(Studios) a").map(e => e.text).join(', ');
+        detail.imageUrl = info.selectFirst("img").attr('src');
+        detail.description = info.selectFirst("p.scroll").text.trim();
+        const st = res.body.match(/<span>Estado:<\/span>\s*<div class="enemision[^"]*">\s*([^<]+?)\s*</)?.[1];
+        detail.status = this.statusFromString(st);
+        const gen = res.body.match(/<li><span>Generos:<\/span>(.*?)<\/li>/s)?.[1];
+        detail.genre = gen ? new Document(gen).select('a').map(e => e.text) : [];
+        const studios = res.body.match(/<li><span>Studios:<\/span>(.*?)<\/li>/s)?.[1];
+        detail.author = studios ? new Document(studios).select('a').map(e => e.text).join(', ') : '';
 
         // get episodes (paginated ajax)
         detail.episodes = [];

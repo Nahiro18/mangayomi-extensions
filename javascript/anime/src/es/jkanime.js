@@ -6,7 +6,7 @@ const mangayomiSources = [{
     "iconUrl": "https://cdn.jkanime.net/logo_jk.png",
     "typeSource": "single",
     "itemType": 1,
-    "version": "0.1.17",
+    "version": "0.1.18",
     "dateFormat": "",
     "dateFormatLocale": "",
     "pkgPath": "anime/src/es/jkanime.js"
@@ -105,7 +105,19 @@ class DefaultExtension extends MProvider {
             'X-Requested-With': 'XMLHttpRequest',
             'Referer': `${this.source.baseUrl}/buscar?q=${query}`
         });
-        const results = JSON.parse(res.body);
+        let results = JSON.parse(res.body);
+        if (results.length == 0) {
+            const words = query.replaceAll('_', ' ').split(' ').filter(w => w.length > 0);
+            for (let n = Math.min(4, words.length); n >= 2 && results.length == 0; n--) {
+                const candidate = words.slice(0, n).join(' ');
+                res = await this.client.post(`${this.source.baseUrl}/ajax_search`, `_token=${encodeURIComponent(token)}&q=${encodeURIComponent(candidate)}`, {
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                    'X-Requested-With': 'XMLHttpRequest',
+                    'Referer': `${this.source.baseUrl}/buscar?q=${candidate}`
+                });
+                results = JSON.parse(res.body);
+            }
+        }
         const list = results.map(item => ({
             name: item.title,
             imageUrl: item.thumbnail ?? item.image,

@@ -6,7 +6,7 @@ const mangayomiSources = [{
     "iconUrl": "https://cdn.jkanime.net/logo_jk.png",
     "typeSource": "single",
     "itemType": 1,
-    "version": "0.1.18",
+    "version": "0.1.19",
     "dateFormat": "",
     "dateFormatLocale": "",
     "pkgPath": "anime/src/es/jkanime.js"
@@ -108,8 +108,15 @@ class DefaultExtension extends MProvider {
         let results = JSON.parse(res.body);
         if (results.length == 0) {
             const words = query.replaceAll('_', ' ').split(' ').filter(w => w.length > 0);
-            for (let n = Math.min(4, words.length); n >= 2 && results.length == 0; n--) {
-                const candidate = words.slice(0, n).join(' ');
+            const candidates = [];
+            for (let n = 4; n >= 2; n--) {
+                if (words.length >= n) candidates.push(words.slice(0, n).join(' '));
+                if (words.length >= n + 1) candidates.push(words.slice(words.length - n).join(' '));
+            }
+            candidates.push(words.slice(0, 2).join(' '));
+            candidates.push(words.slice(words.length - 2).join(' '));
+            for (const candidate of candidates) {
+                if (results.length > 0) break;
                 res = await this.client.post(`${this.source.baseUrl}/ajax_search`, `_token=${encodeURIComponent(token)}&q=${encodeURIComponent(candidate)}`, {
                     'Content-Type': 'application/x-www-form-urlencoded',
                     'X-Requested-With': 'XMLHttpRequest',

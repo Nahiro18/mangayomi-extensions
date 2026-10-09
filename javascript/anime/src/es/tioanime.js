@@ -6,7 +6,7 @@ const mangayomiSources = [{
     "iconUrl": "https://tioanime.com/assets/img/tio_fb.jpg",
     "typeSource": "single",
     "itemType": 1,
-    "version": "0.1.16",
+    "version": "0.1.17",
     "dateFormat": "",
     "dateFormatLocale": "",
     "pkgPath": "anime/src/es/tioanime.js"
@@ -20,6 +20,11 @@ class DefaultExtension extends MProvider {
     getHeaders(url) {
         throw new Error("getHeaders not implemented");
     }
+    // the site appends " (TV)" to series titles; that suffix breaks the app's
+    // title matcher (score < 0.7), so strip it for matching/display
+    cleanTitle(name) {
+        return (name ?? '').replace(/\s*\((tv|ona|ova|special|movie)\)\s*$/i, '').trim();
+    }
     async parseAnimeList(url) {
         const res = await this.client.get(url);
         const doc = new Document(res.body);
@@ -27,7 +32,7 @@ class DefaultExtension extends MProvider {
         const list = [];
 
         for (const element of elements) {
-            const name = element.selectFirst(".title").text;
+            const name = this.cleanTitle(element.selectFirst(".title").text);
             const imageUrl = this.source.baseUrl + element.selectFirst("img").getSrc;
             const link = element.selectFirst("a").getHref;
             list.push({ name, imageUrl, link });

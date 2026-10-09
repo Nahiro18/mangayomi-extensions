@@ -6,7 +6,7 @@ const mangayomiSources = [{
     "iconUrl": "https://cdn.jkanime.net/logo_jk.png",
     "typeSource": "single",
     "itemType": 1,
-    "version": "0.1.25",
+    "version": "0.1.26",
     "dateFormat": "",
     "dateFormatLocale": "",
     "pkgPath": "anime/src/es/jkanime.js"
@@ -99,17 +99,18 @@ class DefaultExtension extends MProvider {
     async searchAnime(query, page) {
         if (page > 1) return { "list": [], "hasNextPage": false };
         const words = query.replaceAll('_', ' ').split(' ').filter(w => w.length > 0);
-        const candidates = [query];
+        // site search is now GET /buscar?q=words (old /buscar/a_b_c returns nothing)
+        const candSets = [words];
         for (let n = 4; n >= 2; n--) {
-            if (words.length >= n) candidates.push(words.slice(0, n).join('_'));
-            if (words.length >= n + 1) candidates.push(words.slice(words.length - n).join('_'));
+            if (words.length >= n) candSets.push(words.slice(0, n));
+            if (words.length >= n + 1) candSets.push(words.slice(words.length - n));
         }
-        if (words.length >= 2) candidates.push(words.slice(0, 2).join('_'));
-        if (words.length >= 3) candidates.push(words.slice(words.length - 2).join('_'));
+        if (words.length >= 2) candSets.push(words.slice(0, 2));
+        if (words.length >= 3) candSets.push(words.slice(words.length - 2));
         let list = [];
-        for (const candidate of candidates) {
+        for (const cand of candSets) {
             if (list.length > 0) break;
-            const res = await this.client.get(`${this.source.baseUrl}/buscar/${candidate}`);
+            const res = await this.client.get(`${this.source.baseUrl}/buscar?q=${cand.join('+')}`);
             for (const item of new Document(res.body).select('div.anime__item')) {
                 const link = item.selectFirst('a')?.getHref;
                 const name = item.selectFirst('h5 a')?.text;
@@ -149,10 +150,15 @@ class DefaultExtension extends MProvider {
             detail.author = authors.join(', ');
         }
 
-        // get episodes from last episode link (no POST/CSRF needed)
+        // get episode count: ongoing anime have the last-episode link (id="uep"),
+        // finished anime only show <li><span>Episodios:</span> N</li>
         detail.episodes = [];
+        let lastEp = 0;
         const uep = res.body.match(/href="([^"]+)"[^>]*id="uep"/)?.[1];
-        const lastEp = uep ? parseInt(uep.match(/\/(\d+)\/?$/)?.[1]) : 0;
+        if (uep) lastEp = parseInt(uep.match(/\/(\d+)\/?$/)?.[1]) || 0;
+        if (!lastEp) {
+            lastEp = parseInt(res.body.match(/<li><span>Episodios:<\/span>\s*(\d+)/)?.[1]) || 0;
+        }
         if (lastEp > 0) {
             const base = url.endsWith('/') ? url.slice(0, -1) : url;
             for (let i = 1; i <= lastEp; i++) {
@@ -168,7 +174,9 @@ class DefaultExtension extends MProvider {
     async extractRedirect(redirect, referer, lang, type, host) {
         const u = redirect.startsWith('http') ? redirect : this.source.baseUrl + redirect;
         const res = await this.client.get(u, {'Referer': referer});
-        const m3u = res.body.match(/http.*?.m3u8/)?.[0];
+        // the m3u8 needs its ?st=&e= signature query, without it the CDN returns 403
+        const m3u = res.body.match(/https?:\/\/[^\s"'<>]+?\.m3u8\?[^"'<>\s]+/)?.[0]
+            ?? res.body.match(/https?:\/\/[^\s"'<>]+?\.m3u8/)?.[0];
         if (!m3u) return [];
         return [{ url: m3u, originalUrl: m3u, headers: {'Referer': referer}, quality: `${lang} ${type} ${host}` }];
     };

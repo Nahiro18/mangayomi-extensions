@@ -6,7 +6,7 @@ const mangayomiSources = [{
     "iconUrl": "https://cdn.jkanime.net/logo_jk.png",
     "typeSource": "single",
     "itemType": 1,
-    "version": "0.1.26",
+    "version": "0.1.27",
     "dateFormat": "",
     "dateFormatLocale": "",
     "pkgPath": "anime/src/es/jkanime.js"
@@ -96,6 +96,11 @@ class DefaultExtension extends MProvider {
             return await this.parseAnimeList(url);
         }        
     }
+    // the site appends " (TV)" to series titles; that suffix breaks the app's
+    // title matcher (score < 0.7), so strip it for matching/display
+    cleanTitle(name) {
+        return (name ?? '').replace(/\s*\((tv|ona|ova|special|movie)\)\s*$/i, '').trim();
+    }
     async searchAnime(query, page) {
         if (page > 1) return { "list": [], "hasNextPage": false };
         const words = query.replaceAll('_', ' ').split(' ').filter(w => w.length > 0);
@@ -113,7 +118,7 @@ class DefaultExtension extends MProvider {
             const res = await this.client.get(`${this.source.baseUrl}/buscar?q=${cand.join('+')}`);
             for (const item of new Document(res.body).select('div.anime__item')) {
                 const link = item.selectFirst('a')?.getHref;
-                const name = item.selectFirst('h5 a')?.text;
+                const name = this.cleanTitle(item.selectFirst('h5 a')?.text);
                 const imageUrl = item.selectFirst('div.anime__item__pic')?.attr('data-setbg');
                 if (link && name) list.push({ name, imageUrl, link });
             }
@@ -121,15 +126,16 @@ class DefaultExtension extends MProvider {
         return { "list": list, "hasNextPage": false };
     }
     async getDetail(url) {
+        const detail = { name: '', imageUrl: '', description: '', status: 5, genre: [], author: '', episodes: [] };
+        try {
         let res = await this.client.get(url);
         const doc = new Document(res.body);
-        const detail = {};
 
         const info = doc.selectFirst("div.anime__details__content");
         if (info) {
-            detail.name = info.selectFirst("h3")?.text;
-            detail.imageUrl = info.selectFirst("img")?.attr('src');
-            detail.description = info.selectFirst("p.scroll")?.text.trim();
+            detail.name = this.cleanTitle(info.selectFirst("h3")?.text);
+            detail.imageUrl = info.selectFirst("img")?.attr('src') ?? '';
+            detail.description = (info.selectFirst("p.scroll")?.text ?? '').trim();
         }
         const st = res.body.match(/<span>Estado:<\/span>\s*<div class="enemision[^"]*">\s*([^<]+?)\s*</)?.[1];
         detail.status = this.statusFromString(st);
@@ -169,6 +175,7 @@ class DefaultExtension extends MProvider {
             }
             detail.episodes.reverse();
         }
+        } catch (e) {}
         return detail;
     }
     async extractRedirect(redirect, referer, lang, type, host) {
@@ -182,6 +189,7 @@ class DefaultExtension extends MProvider {
     };
     // For anime episode video list
     async getVideoList(url) {
+        try {
         const res = await this.client.get(url);
         const doc = new Document(res.body);
         let promises = [];
@@ -211,6 +219,9 @@ class DefaultExtension extends MProvider {
             }
         }
         return sortVideos(videos);
+        } catch (e) {
+            return [];
+        }
     }
     getFilterList() {
         return [

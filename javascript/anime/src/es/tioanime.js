@@ -6,7 +6,7 @@ const mangayomiSources = [{
     "iconUrl": "https://tioanime.com/assets/img/tio_fb.jpg",
     "typeSource": "single",
     "itemType": 1,
-    "version": "0.1.17",
+    "version": "0.1.18",
     "dateFormat": "",
     "dateFormatLocale": "",
     "pkgPath": "anime/src/es/tioanime.js"
@@ -37,7 +37,7 @@ class DefaultExtension extends MProvider {
             const link = element.selectFirst("a").getHref;
             list.push({ name, imageUrl, link });
         }
-        const isLastPage = doc.selectFirst("li.page-item.active + li").text == "»";
+        const isLastPage = doc.selectFirst("li.page-item.active + li")?.text == "»";
         return { "list": list, "hasNextPage": !isLastPage };
     }
     statusFromString(status) {
@@ -82,20 +82,23 @@ class DefaultExtension extends MProvider {
         return [...new Set(variants)].filter(v => v.length > 0);
     }
     async getDetail(url) {
+        const detail = { name: '', imageUrl: '', description: '', status: 5, genre: [], episodes: [] };
+        try {
         const res = await this.client.get(this.source.baseUrl + url);
         const doc = new Document(res.body);
-        const detail = {};
 
         const info = doc.selectFirst("article.anime-single");
         const episodeScript = doc.select("script").find(s => s.innerHtml.includes("var episodes"));
-        const episodeCount = episodeScript ? parseInt(/episodes = \[(\d+)/.exec(episodeScript.innerHtml)[1]) : 0;
+        const episodeCount = episodeScript ? parseInt(/episodes = \[(\d+)/.exec(episodeScript.innerHtml)?.[1]) || 0 : 0;
         const episodeUrl = url.replace("/anime", "/ver") + "-";
 
-        detail.name = info.selectFirst("h1").text;
-        detail.status = this.statusFromString(info.selectFirst("a").text);
-        detail.imageUrl = this.source.baseUrl + info.selectFirst("img").getSrc;
-        detail.description = info.selectFirst("p.sinopsis").text.trim();
-        detail.genre = info.select("p.genres a").map(e => e.text.trim());
+        if (info) {
+            detail.name = this.cleanTitle(info.selectFirst("h1")?.text);
+            detail.status = this.statusFromString(info.selectFirst("a")?.text);
+            detail.imageUrl = this.source.baseUrl + (info.selectFirst("img")?.getSrc ?? '');
+            detail.description = (info.selectFirst("p.sinopsis")?.text ?? '').trim();
+            detail.genre = info.select("p.genres a").map(e => e.text.trim());
+        }
         detail.episodes = [];
         for (let i = 0; i < episodeCount; i++) {
             const name = `Episodio ${i + 1}`;
@@ -103,10 +106,12 @@ class DefaultExtension extends MProvider {
             detail.episodes.push({ name, url });
         }
         detail.episodes.reverse();
+        } catch (e) {}
         return detail;
     }
     // For anime episode video list
     async getVideoList(url) {
+        try {
         const res = await this.client.get(this.source.baseUrl + url);
         const doc = new Document(res.body);
         let promises = [];
@@ -121,17 +126,29 @@ class DefaultExtension extends MProvider {
 
         // extract videos
         for (const raw of raws) {
-            const data = JSON.parse(raw[0]);
-            const host = data[0];
-            const link = data[1];
-            promises.push(extractAny(link, host.toLowerCase(), 'Español', type, host));
+            try {
+                const data = JSON.parse(raw[0]);
+                const host = data[0];
+                const link = data[1];
+                if (host && link) promises.push(extractAny(link, host.toLowerCase(), 'Español', type, host));
+            } catch (e) {}
         }
         for (const p of (await Promise.allSettled(promises))) {
             if (p.status == 'fulfilled') {
                 videos.push.apply(videos, p.value);
             }
         }
-        return sortVideos(videos);
+        // drop duplicate urls (mirrors can resolve to the same stream)
+        const seen = new Set();
+        const unique = videos.filter(v => {
+            if (!v.url || seen.has(v.url)) return false;
+            seen.add(v.url);
+            return true;
+        });
+        return sortVideos(unique);
+        } catch (e) {
+            return [];
+        }
     }
     getFilterList() {
         throw new Error("getFilterList not implemented");
@@ -140,7 +157,7 @@ class DefaultExtension extends MProvider {
         const languages = ['Español'];
         const types = ['Sub'];
         const resolutions = ['1080p', '720p', '480p'];
-        const hosts = ['Okru', 'VidGuard', 'Voe', 'YourUpload'];
+        const hosts = ['Maru', 'Mega', 'MixDrop', 'Netu', 'Okru', 'StreamSB', 'VidGuard', 'Voe', 'YourUpload'];
 
         return [
             {
@@ -355,7 +372,7 @@ async function mixdropExtractor(url) {
     
     const code = doc.selectFirst('script:contains(MDCore):contains(eval)').text;
     const unpacked = unpackJs(code);
-    let videoUrl = unpacked.match(/wurl="(.*?)"/)?.[1];
+    let videoUrl = unpacked.match(/wurl="(.*?)"/)?.[1] ?? unpacked.match(/furl="(.*?)"/)?.[1];
 
     if (!videoUrl) return [];
 
@@ -402,6 +419,43 @@ async function luluvdoExtractor(url) {
     const headers = {'user-agent': 'Mangayomi'};
     const res = await client.get(`${match[1]}/dl?op=embed&file_code=${match[2]}`, headers);    
     return await jwplayerExtractor(res.body, headers);
+}
+
+async function maruExtractor(url) {
+    // mail.ru embed page -> metadata json with direct mp4 links
+    try {
+        const res = await new Client().get(url);
+        let metaUrl = res.body.match(/metadataUrl["']?\s*[:=]\s*["']([^"']+)["']/)?.[1] ?? '';
+        metaUrl = metaUrl.replaceAll('\\/', '/').replaceAll('\\u0026', '&');
+        if (!metaUrl) return [];
+        if (!metaUrl.startsWith('http')) metaUrl = 'https://my.mail.ru' + metaUrl;
+        const meta = await new Client().get(metaUrl, { 'Referer': url });
+        const videos = [];
+        for (const m of meta.body.matchAll(/"url"\s*:\s*"(https?:\/\/[^"]+?\.mp4[^"]*)"/g)) {
+            const vu = m[1].replace(/\\u0026/g, '&').replaceAll('\\/', '/');
+            videos.push({ url: vu, originalUrl: vu, quality: '', headers: { 'Referer': 'https://my.mail.ru/' } });
+        }
+        return videos;
+    } catch (e) {
+        return [];
+    }
+}
+
+async function netuExtractor(url) {
+    // hqq.tv embed page -> var ws -> get_md5.php returns the direct file
+    try {
+        const vid = url.match(/[?&]vid=([^&#]+)/)?.[1] ?? url.split('/').pop();
+        const page = await new Client().get(`https://hqq.tv/player/embed_player.php?vid=${vid}`);
+        const ws = page.body.match(/var ws = '([^']+)'/)?.[1];
+        if (!ws) return [];
+        const ref = page.request?.url ?? url;
+        const r = await new Client().get('https://hqq.tv/player/get_md5.php' + ws, { 'Referer': ref });
+        const file = (r.body.match(/"(?:file|url|src)"\s*:\s*"(https?:\/\/[^"]+)"/)?.[1] ?? '').replaceAll('\\/', '/');
+        if (!file) return [];
+        return [{ url: file, originalUrl: file, quality: '', headers: { 'Referer': 'https://hqq.tv/' } }];
+    } catch (e) {
+        return [];
+    }
 }
 
 /** Does not work: Client always sets 'charset=utf-8' in Content-Type. */
@@ -568,13 +622,15 @@ extractAny.methods = {
     'doodstream': doodExtractor,
     'filemoon': filemoonExtractor,
     'luluvdo': luluvdoExtractor,
+    'maru': maruExtractor,
     'mixdrop': mixdropExtractor,
     'mp4upload': mp4UploadExtractor,
+    'netu': netuExtractor,
     'okru': okruExtractor,
     'sendvid': sendVidExtractor,
     'speedfiles': speedfilesExtractor,
     'streamtape': streamTapeExtractor,
-    'streamwish': vidHideExtractor,
+    'streamwish': streamWishExtractor,
     'vidguard': vidGuardExtractor,
     'vidhide': vidHideExtractor,
     'vidoza': vidozaExtractor,

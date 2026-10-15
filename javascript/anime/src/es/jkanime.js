@@ -6,7 +6,7 @@ const mangayomiSources = [{
     "iconUrl": "https://cdn.jkanime.net/logo_jk.png",
     "typeSource": "single",
     "itemType": 1,
-    "version": "0.1.27",
+    "version": "0.1.28",
     "dateFormat": "",
     "dateFormatLocale": "",
     "pkgPath": "anime/src/es/jkanime.js"
@@ -199,11 +199,10 @@ class DefaultExtension extends MProvider {
         const code = videosScript ? videosScript.innerHtml : '';
         if (!code) return [];
 
-        // extract direct video links (jkplayer iframes)
-        for (const m of code.matchAll(/video\s*\[\d+\].*?src="(.*?)"/g)) {
+        // extract direct video links (jkplayer iframes, keep every working mirror)
+        for (const m of code.matchAll(/video\s*\[\d+\][^;]*?src=["'](.*?)["']/g)) {
             promises.push(this.extractRedirect(m[1], url, 'Español', 'Sub', 'Desu'));
         }
-        if (promises.length > 0) promises = [Promise.any(promises)];
 
         // extract remote video links
         for (const server of code.matchAll(/{"remote"\s*:\s*"(.*?)".*?"server"\s*:\s*"(.*?)"/g)) {
@@ -218,7 +217,14 @@ class DefaultExtension extends MProvider {
                 videos.push.apply(videos, p.value);
             }
         }
-        return sortVideos(videos);
+        // drop duplicate urls (mirrors can resolve to the same stream)
+        const seen = new Set();
+        const unique = videos.filter(v => {
+            if (!v.url || seen.has(v.url)) return false;
+            seen.add(v.url);
+            return true;
+        });
+        return sortVideos(unique);
         } catch (e) {
             return [];
         }
@@ -412,7 +418,7 @@ class DefaultExtension extends MProvider {
         const languages = ['Español'];
         const types = ['Sub'];
         const resolutions = ['1080p', '720p', '480p'];
-        const hosts = ['Desu', 'Filemoon', 'Mixdrop', 'Mp4upload', 'Streamtape', 'Streamwish', 'Vidhide', 'VOE'];
+        const hosts = ['Desu', 'Doodstream', 'Filemoon', 'Mixdrop', 'Mp4upload', 'Streamtape', 'Streamwish', 'Vidhide', 'VOE'];
 
         return [
             {
@@ -836,6 +842,7 @@ async function extractAny(url, method, lang, type, host, headers = null) {
     const m = extractAny.methods[method];
     return (!m) ? [] : (await m(url, headers)).map(v => {
         v.quality = v.quality ? `${lang} ${type} ${v.quality} ${host}` : `${lang} ${type} ${host}`;
+        v.headers = normalizeHeaders(v.headers, url.match(/.*?:\/\/.*?\//)?.[0]);
         return v;
     });
 };
